@@ -7,7 +7,7 @@ name = "pybitcoinkernel"
 version = "0.1.0"
 description = "Python bindings for Bitcoin Core's libbitcoinkernel"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 keywords = ["bitcoin", "kernel", "consensus", "validation"]
 classifiers = [
@@ -35,11 +35,14 @@ testpaths = ["tests"]
 # the rpaths, producing self-contained wheels.
 
 [tool.cibuildwheel]
-build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+build = "cp312-* cp313-* cp314-*"
 # The kernel build assumes glibc; musl wheels would need their own porting.
 skip = "*-musllinux*"
-manylinux-x86_64-image = "manylinux_2_28"
-manylinux-aarch64-image = "manylinux_2_28"
+# manylinux_2_34 (AlmaLinux 9) rather than 2_28 (AlmaLinux 8): the kernel
+# needs Boost >= 1.73 and el9 ships 1.75 while el8 only has 1.66. Targets
+# glibc >= 2.34, i.e. Ubuntu 22.04+, Debian 12+, Fedora 35+.
+manylinux-x86_64-image = "manylinux_2_34"
+manylinux-aarch64-image = "manylinux_2_34"
 test-requires = "pytest"
 test-command = "python -m pytest {project}/tests -q"
 
