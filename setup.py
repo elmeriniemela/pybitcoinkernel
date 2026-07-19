@@ -4,12 +4,14 @@ The extension links against libbitcoinkernel. The kernel library is
 located (in order of precedence):
 
 1. BITCOINKERNEL_INCLUDE_DIR / BITCOINKERNEL_LIB_DIR - directories
-   containing bitcoinkernel.h and libbitcoinkernel.so. Used by CI, or
-   when linking against a kernel installed elsewhere.
+   containing bitcoinkernel.h and libbitcoinkernel.so, for linking
+   against a kernel installed elsewhere.
 2. BITCOINKERNEL_SOURCE_DIR - a Bitcoin Core source tree; the kernel is
    compiled from it with cmake and bundled into the package.
-3. vendor/ - a project-local prebuilt prefix (vendor/include,
-   vendor/lib). Convenient for development; see README.
+3. vendor/build - a project-local cmake build dir of the kernel (see
+   README "Developing"). The header is taken from the source tree
+   recorded in the build's CMakeCache.txt, so the header and library
+   always match. Used by local development and CI.
 4. external/bitcoin - the pinned git submodule; same as 2. This is what
    a plain `pip install git+https://...` uses: pip checks out the
    submodule, the kernel is compiled from it (several minutes and needs
@@ -27,7 +29,7 @@ from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext as _build_ext
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-VENDOR_PREFIX = PROJECT_ROOT / "vendor"
+KERNEL_BUILD_DIR = PROJECT_ROOT / "vendor" / "build"
 SUBMODULE_DIR = PROJECT_ROOT / "external" / "bitcoin"
 
 KERNEL_CMAKE_FLAGS = [
@@ -53,11 +55,29 @@ Could not locate or build libbitcoinkernel. Either:
   * set BITCOINKERNEL_INCLUDE_DIR and BITCOINKERNEL_LIB_DIR to a prebuilt
     kernel (bitcoinkernel.h / libbitcoinkernel.so), or
   * set BITCOINKERNEL_SOURCE_DIR to a Bitcoin Core source tree, or
-  * provide the vendor/ prefix or the external/bitcoin submodule
-    (git submodule update --init) so the kernel can be built from source
-    (requires cmake >= 3.22, a C++20 compiler, and Boost headers).
+  * provide a kernel cmake build in vendor/build or the external/bitcoin
+    submodule (git submodule update --init) so the kernel can be built
+    from source (requires cmake >= 3.22, a C++20 compiler, and Boost
+    headers).
 See the README for details.\
 """
+
+
+def find_kernel_libs(lib_dir):
+    return sorted(lib_dir.glob("libbitcoinkernel.so*")) + sorted(
+        lib_dir.glob("libbitcoinkernel*.dylib")
+    )
+
+
+def cmake_source_dir(build_dir):
+    """The source tree a cmake build dir was configured from, or None."""
+    cache = build_dir / "CMakeCache.txt"
+    if not cache.exists():
+        return None
+    for line in cache.read_text().splitlines():
+        if line.startswith("CMAKE_HOME_DIRECTORY"):
+            return Path(line.split("=", 1)[1].strip())
+    return None
 
 
 class build_ext(_build_ext):
@@ -82,18 +102,19 @@ class build_ext(_build_ext):
         env_source = os.environ.get("BITCOINKERNEL_SOURCE_DIR")
 
         if env_include or env_lib:
-            include_dir = env_include or str(VENDOR_PREFIX / "include")
-            lib_dir = env_lib or str(VENDOR_PREFIX / "lib")
-            self._use_prebuilt(ext, include_dir, lib_dir)
+            if not (env_include and env_lib):
+                raise RuntimeError(
+                    "set both BITCOINKERNEL_INCLUDE_DIR and BITCOINKERNEL_LIB_DIR "
+                    "(or neither)"
+                )
+            self._use_prebuilt(ext, env_include, env_lib)
             return None
 
         if env_source:
             return self._build_kernel(ext, Path(env_source))
 
-        if any((VENDOR_PREFIX / "lib").glob("libbitcoinkernel.*")):
-            self._use_prebuilt(
-                ext, str(VENDOR_PREFIX / "include"), str(VENDOR_PREFIX / "lib")
-            )
+        if find_kernel_libs(KERNEL_BUILD_DIR / "lib"):
+            self._use_build_dir(ext, KERNEL_BUILD_DIR)
             return None
 
         if (SUBMODULE_DIR / "CMakeLists.txt").exists():
@@ -106,6 +127,24 @@ class build_ext(_build_ext):
         ext.include_dirs.append(include_dir)
         ext.library_dirs.append(lib_dir)
         ext.runtime_library_dirs.append(lib_dir)
+
+    def _use_build_dir(self, ext, build_dir):
+        """Link against a kernel cmake build dir. The header comes from
+        the source tree the build was configured from (recorded in its
+        CMakeCache.txt), so the pair cannot mismatch."""
+        source_dir = cmake_source_dir(build_dir)
+        if source_dir is None:
+            raise RuntimeError(
+                f"{build_dir} has a kernel library but no readable "
+                f"CMakeCache.txt; rebuild it (see README) or remove it"
+            )
+        header = source_dir / "src" / "kernel" / "bitcoinkernel.h"
+        if not header.exists():
+            raise RuntimeError(
+                f"{build_dir} was configured from {source_dir}, but "
+                f"{header} does not exist; rebuild vendor/build (see README)"
+            )
+        self._use_prebuilt(ext, str(header.parent), str(build_dir / "lib"))
 
     def _build_kernel(self, ext, source_dir):
         source_dir = source_dir.resolve()
@@ -125,19 +164,10 @@ class build_ext(_build_ext):
         build_dir = Path(self.build_temp).resolve() / "bitcoinkernel-build"
         # A cache generated for a different source tree makes cmake bail
         # out; start over in that case.
-        cache = build_dir / "CMakeCache.txt"
-        if cache.exists():
-            cached_source = next(
-                (
-                    line.split("=", 1)[1].strip()
-                    for line in cache.read_text().splitlines()
-                    if line.startswith("CMAKE_HOME_DIRECTORY")
-                ),
-                None,
-            )
-            if cached_source != str(source_dir):
-                print(f"discarding stale kernel build cache in {build_dir}", flush=True)
-                shutil.rmtree(build_dir)
+        cached_source = cmake_source_dir(build_dir)
+        if cached_source is not None and cached_source != source_dir:
+            print(f"discarding stale kernel build cache in {build_dir}", flush=True)
+            shutil.rmtree(build_dir)
         print(f"building libbitcoinkernel from {source_dir}", flush=True)
         print("(this compiles Bitcoin Core's kernel; expect several minutes)", flush=True)
         subprocess.run(
@@ -153,15 +183,12 @@ class build_ext(_build_ext):
             check=True,
         )
 
-        lib_dir = build_dir / "lib"
-        libs = sorted(lib_dir.glob("libbitcoinkernel.so*")) + sorted(
-            lib_dir.glob("libbitcoinkernel*.dylib")
-        )
+        libs = find_kernel_libs(build_dir / "lib")
         if not libs:
-            raise RuntimeError(f"kernel build produced no library in {lib_dir}")
+            raise RuntimeError(f"kernel build produced no library in {build_dir / 'lib'}")
 
         ext.include_dirs.append(str(header.parent))
-        ext.library_dirs.append(str(lib_dir))
+        ext.library_dirs.append(str(build_dir / "lib"))
         # The library is bundled next to the extension module, so resolve
         # it relative to the extension at runtime.
         origin = "@loader_path" if sys.platform == "darwin" else "$ORIGIN"

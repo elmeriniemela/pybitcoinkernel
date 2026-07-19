@@ -63,37 +63,34 @@ instead of the submodule.
 ## Developing
 
 For iterating on the bindings, build the kernel once into the
-project-local `vendor/` prefix so reinstalling the package is fast:
+project-local `vendor/build` dir so reinstalling the package is fast.
+`setup.py` links against it directly and takes `bitcoinkernel.h` from
+the source tree recorded in the build's cmake cache, so the header and
+library always match. `vendor/` is gitignored, so `git clean -fdx`
+removes the whole thing.
 
 ```sh
 # 0. Fetch the pinned bitcoin sources
 git submodule update --init
 
-# 1. Build libbitcoinkernel as a shared library. The build dir lives
-#    inside the gitignored vendor/ prefix, so `git clean -fdx` removes
-#    it together with the installed artifacts. A stale build dir
-#    silently rebuilds whatever source tree it was first configured
-#    for, giving you a lib that mismatches the header copied in step 2
-#    - when in doubt, wipe it first.
-rm -rf vendor/build
+# 1. Build libbitcoinkernel as a shared library
 cmake -S external/bitcoin -B vendor/build \
     -DBUILD_KERNEL_LIB=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_DAEMON=OFF -DBUILD_CLI=OFF -DBUILD_TX=OFF -DBUILD_UTIL=OFF \
     -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF -DENABLE_WALLET=OFF -DWITH_ZMQ=OFF -DENABLE_IPC=OFF
 cmake --build vendor/build --target bitcoinkernel -j$(nproc)
 
-# 2. Drop the artifacts into the project-local vendor prefix
-mkdir -p vendor/lib vendor/include
-cp vendor/build/lib/libbitcoinkernel.so vendor/lib/
-cp external/bitcoin/src/kernel/bitcoinkernel.h vendor/include/
-
-# 3. Build and install the package (setup.py picks vendor/ up)
+# 2. Build and install the package (setup.py picks vendor/build up)
 python -m venv .venv
 .venv/bin/pip install -e ".[test]"
 
-# 4. Run the tests
+# 3. Run the tests
 .venv/bin/python -m pytest
 ```
+
+After moving the submodule to a different commit, re-run both cmake
+commands (and reinstall the package) so the library, header, and
+extension stay in sync.
 
 ## Releasing wheels
 
