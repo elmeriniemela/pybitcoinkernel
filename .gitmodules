@@ -1,0 +1,4 @@
+[submodule "external/bitcoin"]
+	path = external/bitcoin
+	url = https://github.com/bitcoin/bitcoin.git
+	shallow = true

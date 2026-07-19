@@ -27,3 +27,42 @@ packages = ["pybitcoinkernel"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# --- cibuildwheel: prebuilt wheels for PyPI --------------------------------
+# The kernel is compiled once per build container in before-all and dropped
+# into the vendor/ prefix, which setup.py picks up. auditwheel (Linux) /
+# delocate (macOS) then graft libbitcoinkernel into each wheel and rewrite
+# the rpaths, producing self-contained wheels.
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+# The kernel build assumes glibc; musl wheels would need their own porting.
+skip = "*-musllinux*"
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+test-requires = "pytest"
+test-command = "python -m pytest {project}/tests -q"
+
+[tool.cibuildwheel.linux]
+before-all = [
+    "dnf install -y boost-devel",
+    "cmake -S {project}/external/bitcoin -B /tmp/btck-build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_KERNEL_LIB=ON -DBUILD_DAEMON=OFF -DBUILD_CLI=OFF -DBUILD_TX=OFF -DBUILD_UTIL=OFF -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF -DBUILD_FUZZ_BINARY=OFF -DENABLE_WALLET=OFF -DWITH_ZMQ=OFF",
+    "cmake --build /tmp/btck-build --target bitcoinkernel --parallel $(nproc)",
+    "mkdir -p {project}/vendor/lib {project}/vendor/include",
+    "cp -a /tmp/btck-build/lib/libbitcoinkernel.so* {project}/vendor/lib/",
+    "cp {project}/external/bitcoin/src/kernel/bitcoinkernel.h {project}/vendor/include/",
+]
+
+[tool.cibuildwheel.macos]
+before-all = [
+    "brew install boost",
+    "cmake -S {project}/external/bitcoin -B /tmp/btck-build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_KERNEL_LIB=ON -DBUILD_DAEMON=OFF -DBUILD_CLI=OFF -DBUILD_TX=OFF -DBUILD_UTIL=OFF -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF -DBUILD_FUZZ_BINARY=OFF -DENABLE_WALLET=OFF -DWITH_ZMQ=OFF",
+    "cmake --build /tmp/btck-build --target bitcoinkernel --parallel $(sysctl -n hw.ncpu)",
+    "mkdir -p {project}/vendor/lib {project}/vendor/include",
+    "cp -a /tmp/btck-build/lib/libbitcoinkernel*.dylib {project}/vendor/lib/",
+    "cp {project}/external/bitcoin/src/kernel/bitcoinkernel.h {project}/vendor/include/",
+]
+
+[tool.cibuildwheel.macos.environment]
+# Bitcoin Core requires a recent macOS; keep wheels consistent with it.
+MACOSX_DEPLOYMENT_TARGET = "13.0"
