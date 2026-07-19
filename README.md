@@ -25,14 +25,14 @@ Core's kernel from scratch, so it takes several minutes and requires:
 
 * cmake >= 3.22
 * a C++20 compiler
-* Boost headers (`boost-devel` / `libboost-dev` / `brew install boost`)
+* Boost headers (`boost-devel` / `libboost-dev`)
 
 Run pip with `-v` to watch the compilation progress.
 
 ### From prebuilt wheels
 
 Wheels are built by CI (`.github/workflows/wheels.yml`) for Linux
-x86_64/aarch64 and macOS arm64, and published to PyPI on version tags:
+x86_64 and aarch64, and published to PyPI on version tags:
 
 ```sh
 pip install pybitcoinkernel
