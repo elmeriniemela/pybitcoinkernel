@@ -28,7 +28,7 @@ packages = ["pybitcoinkernel"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-# --- cibuildwheel: prebuilt wheels for PyPI --------------------------------
+# --- cibuildwheel: prebuilt wheels -----------------------------------------
 # The kernel is compiled once per build container in before-all into
 # vendor/build, which setup.py picks up. auditwheel then grafts
 # libbitcoinkernel into each wheel and rewrites the rpaths, producing

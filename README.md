@@ -117,13 +117,6 @@ gh release create v0.1.0 wheelhouse/**/*.whl --title v0.1.0 --notes "..."
 The install URL in [From prebuilt wheels](#from-prebuilt-wheels) follows
 from the tag and wheel filename.
 
-Optionally, the workflow can also publish to PyPI (making plain
-`pip install pybitcoinkernel` work): register the repo as a trusted
-publisher at https://pypi.org/manage/account/publishing/ (workflow
-`wheels.yml`, environment `pypi`). The publish job runs automatically
-when a `v*` tag is pushed; without the PyPI registration it simply
-fails and can be ignored.
-
 ## Usage
 
 For a guided tour with runnable scripts, see
@@ -196,15 +189,3 @@ conn = pbk.LoggingConnection(print)
 pbk.logging_enable_category(pbk.LogCategory.VALIDATION)
 pbk.logging_set_level_category(pbk.LogCategory.ALL, pbk.LogLevel.DEBUG)
 ```
-
-## Notes
-
-* Every wrapper object owns its kernel handle; memory is managed
-  automatically. `Chain` and `BlockTreeEntry` are views tied to their
-  `ChainstateManager` — they keep it alive, and raise `ValueError` if it
-  was explicitly `close()`d.
-* Long-running calls (block processing, imports, disk reads, chainstate
-  construction/teardown) release the GIL; kernel callbacks may arrive
-  from kernel threads and are safe to handle in Python.
-* The kernel API is unversioned and not yet stable; these bindings track
-  the header in `vendor/include/bitcoinkernel.h`.

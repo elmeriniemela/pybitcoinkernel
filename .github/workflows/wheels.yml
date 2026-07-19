@@ -1,11 +1,6 @@
-# Build prebuilt wheels with cibuildwheel and publish them to PyPI on
-# version tags (v*). The cibuildwheel behavior itself (kernel build,
-# bundling, per-wheel tests) is configured in [tool.cibuildwheel] in
-# pyproject.toml.
-#
-# Publishing uses PyPI "trusted publishing" (OIDC) - register this repo
-# and workflow once at https://pypi.org/manage/account/publishing/
-# (project: pybitcoinkernel, workflow: wheels.yml, environment: pypi).
+# Build prebuilt wheels with cibuildwheel on version tags (v*). The
+# cibuildwheel behavior itself (kernel build, bundling, per-wheel tests)
+# is configured in [tool.cibuildwheel] in pyproject.toml.
 
 name: wheels
 
@@ -56,18 +51,3 @@ jobs:
         with:
           name: sdist
           path: dist/*.tar.gz
-
-  publish:
-    name: publish to PyPI
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [build_wheels, build_sdist]
-    runs-on: ubuntu-24.04
-    environment: pypi
-    permissions:
-      id-token: write  # OIDC for PyPI trusted publishing
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - uses: pypa/gh-action-pypi-publish@release/v1
