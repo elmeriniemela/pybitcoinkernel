@@ -1337,6 +1337,18 @@ PrecomputedTransactionData_new(PyTypeObject* type, PyObject* args, PyObject* kwd
             return NULL;
         }
         spent_len = (size_t)PySequence_Fast_GET_SIZE(seq);
+        /* The kernel asserts (aborts) when a non-empty spent_outputs array
+         * does not match the transaction's input count. */
+        size_t n_inputs =
+            btck_transaction_count_inputs(((TransactionObject*)tx_obj)->ptr);
+        if (spent_len != 0 && spent_len != n_inputs) {
+            Py_DECREF(seq);
+            PyErr_Format(PyExc_ValueError,
+                         "spent_outputs has %zu entries but the transaction has "
+                         "%zu inputs; provide one spent output per input",
+                         spent_len, n_inputs);
+            return NULL;
+        }
         if (spent_len > 0) {
             spent = PyMem_Malloc(spent_len * sizeof(*spent));
             if (spent == NULL) {
@@ -1408,10 +1420,16 @@ BlockHeader_new(PyTypeObject* type, PyObject* args, PyObject* kwds)
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "y*", kwlist, &data)) {
         return NULL;
     }
+    /* The kernel asserts (aborts) on any other length. */
+    if (data.len != 80) {
+        PyBuffer_Release(&data);
+        PyErr_SetString(PyExc_ValueError, "block header must be exactly 80 bytes");
+        return NULL;
+    }
     btck_BlockHeader* ptr = btck_block_header_create(data.buf, (size_t)data.len);
     PyBuffer_Release(&data);
     if (ptr == NULL) {
-        PyErr_SetString(KernelError, "failed to deserialize block header (must be 80 bytes)");
+        PyErr_SetString(KernelError, "failed to deserialize block header");
         return NULL;
     }
     BlockHeaderObject* self = (BlockHeaderObject*)type->tp_alloc(type, 0);
@@ -2584,23 +2602,16 @@ ChainstateManager_process_block_header(ChainstateManagerObject* self, PyObject* 
         PyErr_SetString(PyExc_TypeError, "expected BlockHeader");
         return NULL;
     }
-    btck_BlockValidationState* state = btck_block_validation_state_create();
-    if (state == NULL) {
-        PyErr_SetString(KernelError, "failed to create block validation state");
-        return NULL;
-    }
     btck_BlockHeader* header = ((BlockHeaderObject*)arg)->ptr;
-    int rc;
+    btck_BlockValidationState* state;
     Py_BEGIN_ALLOW_THREADS
-    rc = btck_chainstate_manager_process_block_header(self->ptr, header, state);
+    state = btck_chainstate_manager_process_block_header(self->ptr, header);
     Py_END_ALLOW_THREADS
-    PyObject* state_obj = BlockValidationState_wrap(state);
-    if (state_obj == NULL) {
+    if (state == NULL) {
+        PyErr_SetString(KernelError, "failed to process block header");
         return NULL;
     }
-    PyObject* result = Py_BuildValue("(OO)", rc == 0 ? Py_True : Py_False, state_obj);
-    Py_DECREF(state_obj);
-    return result;
+    return BlockValidationState_wrap(state);
 }
 
 static PyObject*
@@ -2740,7 +2751,8 @@ static PyMethodDef ChainstateManager_methods[] = {
      "False if the block was invalid or could not be processed; `new` is True\n"
      "if the block was not processed before."},
     {"process_block_header", (PyCFunction)ChainstateManager_process_block_header, METH_O,
-     "process_block_header(header) -> (accepted: bool, state: BlockValidationState)"},
+     "process_block_header(header) -> BlockValidationState\n\n"
+     "Validate a block header and, if valid, add it to the block index."},
     {"import_blocks", (PyCFunction)(void (*)(void))ChainstateManager_import_blocks,
      METH_VARARGS | METH_KEYWORDS,
      "import_blocks(paths=None)\n\n"

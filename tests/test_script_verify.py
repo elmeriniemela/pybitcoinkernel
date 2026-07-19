@@ -124,6 +124,14 @@ def test_taproot_verify():
     )
 
 
+def test_precomputed_spent_outputs_count_mismatch_raises():
+    script = pbk.ScriptPubkey(bytes.fromhex(TAPROOT_SPENT_SCRIPT))
+    tx = pbk.Transaction(bytes.fromhex(TAPROOT_SPENDING_TX))  # 1 input
+    spent = pbk.TransactionOutput(script, TAPROOT_AMOUNT)
+    with pytest.raises(ValueError):
+        pbk.PrecomputedTransactionData(tx, [spent, spent])
+
+
 def test_taproot_without_precomputed_raises():
     script = pbk.ScriptPubkey(bytes.fromhex(TAPROOT_SPENT_SCRIPT))
     tx = pbk.Transaction(bytes.fromhex(TAPROOT_SPENDING_TX))

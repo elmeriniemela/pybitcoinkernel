@@ -68,11 +68,10 @@ git submodule update --init
 cmake -S external/bitcoin -B /tmp/btck-build \
     -DBUILD_KERNEL_LIB=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_DAEMON=OFF -DBUILD_CLI=OFF -DBUILD_TX=OFF -DBUILD_UTIL=OFF \
-    -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF -DENABLE_WALLET=OFF -DWITH_ZMQ=OFF
+    -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF -DENABLE_WALLET=OFF -DWITH_ZMQ=OFF -DENABLE_IPC=OFF
 cmake --build /tmp/btck-build --target bitcoinkernel -j$(nproc)
 
 # 2. Drop the artifacts into the project-local vendor prefix
-mkdir -p vendor/lib vendor/include
 cp /tmp/btck-build/lib/libbitcoinkernel.so vendor/lib/
 cp external/bitcoin/src/kernel/bitcoinkernel.h vendor/include/
 

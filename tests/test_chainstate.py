@@ -144,8 +144,7 @@ def test_process_block_header(chainman):
     genesis_hash = chain[0].block_hash.to_bytes()
     raw = mine_block(genesis_hash, 1)
     header = pbk.BlockHeader(raw[:80])
-    accepted, state = chainman.process_block_header(header)
-    assert accepted
+    state = chainman.process_block_header(header)
     assert state.mode == pbk.ValidationMode.VALID
     # Header-only processing does not extend the chain.
     assert chain.height == 0

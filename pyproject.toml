@@ -49,7 +49,7 @@ test-command = "python -m pytest {project}/tests -q"
 [tool.cibuildwheel.linux]
 before-all = [
     "dnf install -y boost-devel",
-    "cmake -S {project}/external/bitcoin -B /tmp/btck-build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_KERNEL_LIB=ON -DBUILD_DAEMON=OFF -DBUILD_CLI=OFF -DBUILD_TX=OFF -DBUILD_UTIL=OFF -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF -DBUILD_FUZZ_BINARY=OFF -DENABLE_WALLET=OFF -DWITH_ZMQ=OFF",
+    "cmake -S {project}/external/bitcoin -B /tmp/btck-build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_KERNEL_LIB=ON -DBUILD_DAEMON=OFF -DBUILD_CLI=OFF -DBUILD_TX=OFF -DBUILD_UTIL=OFF -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF -DBUILD_FUZZ_BINARY=OFF -DENABLE_WALLET=OFF -DWITH_ZMQ=OFF -DENABLE_IPC=OFF",
     "cmake --build /tmp/btck-build --target bitcoinkernel --parallel $(nproc)",
     "mkdir -p {project}/vendor/lib {project}/vendor/include",
     "cp -a /tmp/btck-build/lib/libbitcoinkernel.so* {project}/vendor/lib/",

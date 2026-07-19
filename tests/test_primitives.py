@@ -129,7 +129,7 @@ class TestBlockHeader:
         assert header.prev_hash.to_bytes() == b"\x00" * 32
 
     def test_wrong_size_raises(self):
-        with pytest.raises(pbk.KernelError):
+        with pytest.raises(ValueError):
             pbk.BlockHeader(b"\x00" * 79)
 
 

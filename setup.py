@@ -43,6 +43,9 @@ KERNEL_CMAKE_FLAGS = [
     "-DBUILD_FUZZ_BINARY=OFF",
     "-DENABLE_WALLET=OFF",
     "-DWITH_ZMQ=OFF",
+    # Multiprocess support would require Cap'n Proto; the kernel lib
+    # doesn't need it.
+    "-DENABLE_IPC=OFF",
 ]
 
 NO_KERNEL_HELP = """\
@@ -120,6 +123,21 @@ class build_ext(_build_ext):
             )
 
         build_dir = Path(self.build_temp).resolve() / "bitcoinkernel-build"
+        # A cache generated for a different source tree makes cmake bail
+        # out; start over in that case.
+        cache = build_dir / "CMakeCache.txt"
+        if cache.exists():
+            cached_source = next(
+                (
+                    line.split("=", 1)[1].strip()
+                    for line in cache.read_text().splitlines()
+                    if line.startswith("CMAKE_HOME_DIRECTORY")
+                ),
+                None,
+            )
+            if cached_source != str(source_dir):
+                print(f"discarding stale kernel build cache in {build_dir}", flush=True)
+                shutil.rmtree(build_dir)
         print(f"building libbitcoinkernel from {source_dir}", flush=True)
         print("(this compiles Bitcoin Core's kernel; expect several minutes)", flush=True)
         subprocess.run(
