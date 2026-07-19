@@ -4,6 +4,8 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-vendor/
+vendor/include/*.h
+vendor/build/
 .venv/
 .pytest_cache/
+wheelhouse/

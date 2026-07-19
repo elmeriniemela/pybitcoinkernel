@@ -32,10 +32,15 @@ Run pip with `-v` to watch the compilation progress.
 ### From prebuilt wheels
 
 Wheels are built by CI (`.github/workflows/wheels.yml`) for Linux
-x86_64 and aarch64, and published to PyPI on version tags:
+x86_64 and aarch64 (CPython 3.12-3.14, glibc >= 2.34: Ubuntu 22.04+,
+Debian 12+, Fedora 35+) and attached to [GitHub
+releases](https://github.com/elmeriniemela/pybitcoinkernel/releases).
+They are fully self-contained - `libbitcoinkernel` is bundled inside, so
+the target machine needs nothing but Python. Pick the wheel matching
+your Python version and architecture, e.g. for Python 3.12 on x86_64:
 
 ```sh
-pip install pybitcoinkernel
+pip install https://github.com/elmeriniemela/pybitcoinkernel/releases/download/v0.1.0/pybitcoinkernel-0.1.0-cp312-cp312-manylinux_2_34_x86_64.whl
 ```
 
 ### Against an existing kernel build
@@ -64,15 +69,22 @@ project-local `vendor/` prefix so reinstalling the package is fast:
 # 0. Fetch the pinned bitcoin sources
 git submodule update --init
 
-# 1. Build libbitcoinkernel as a shared library
-cmake -S external/bitcoin -B /tmp/btck-build \
+# 1. Build libbitcoinkernel as a shared library. The build dir lives
+#    inside the gitignored vendor/ prefix, so `git clean -fdx` removes
+#    it together with the installed artifacts. A stale build dir
+#    silently rebuilds whatever source tree it was first configured
+#    for, giving you a lib that mismatches the header copied in step 2
+#    - when in doubt, wipe it first.
+rm -rf vendor/build
+cmake -S external/bitcoin -B vendor/build \
     -DBUILD_KERNEL_LIB=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_DAEMON=OFF -DBUILD_CLI=OFF -DBUILD_TX=OFF -DBUILD_UTIL=OFF \
     -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF -DENABLE_WALLET=OFF -DWITH_ZMQ=OFF -DENABLE_IPC=OFF
-cmake --build /tmp/btck-build --target bitcoinkernel -j$(nproc)
+cmake --build vendor/build --target bitcoinkernel -j$(nproc)
 
 # 2. Drop the artifacts into the project-local vendor prefix
-cp /tmp/btck-build/lib/libbitcoinkernel.so vendor/lib/
+mkdir -p vendor/lib vendor/include
+cp vendor/build/lib/libbitcoinkernel.so vendor/lib/
 cp external/bitcoin/src/kernel/bitcoinkernel.h vendor/include/
 
 # 3. Build and install the package (setup.py picks vendor/ up)
@@ -85,12 +97,35 @@ python -m venv .venv
 
 ## Releasing wheels
 
-Tag a version (`git tag v0.1.0 && git push --tags`) and the `wheels`
-workflow builds wheels for all supported platforms, runs the test suite
-against each one, and publishes to PyPI via trusted publishing. One-time
-setup: register the repo as a trusted publisher at
-https://pypi.org/manage/account/publishing/ (workflow `wheels.yml`,
-environment `pypi`).
+The `wheels` workflow builds wheels for all supported platforms
+(compiling the kernel from the `external/bitcoin` submodule inside
+manylinux containers) and runs the full test suite against each wheel
+before accepting it.
+
+To cut a release:
+
+```sh
+# 1. Bump `version` in pyproject.toml, commit, push.
+
+# 2. Build the wheels
+gh workflow run wheels.yml && sleep 5 && gh run watch
+
+# 3. Download the wheels from the finished run
+gh run download --name wheels-ubuntu-24.04 --name wheels-ubuntu-24.04-arm --dir wheelhouse
+
+# 4. Attach them to a GitHub release (creates the tag)
+gh release create v0.1.0 wheelhouse/**/*.whl --title v0.1.0 --notes "..."
+```
+
+The install URL in [From prebuilt wheels](#from-prebuilt-wheels) follows
+from the tag and wheel filename.
+
+Optionally, the workflow can also publish to PyPI (making plain
+`pip install pybitcoinkernel` work): register the repo as a trusted
+publisher at https://pypi.org/manage/account/publishing/ (workflow
+`wheels.yml`, environment `pypi`). The publish job runs automatically
+when a `v*` tag is pushed; without the PyPI registration it simply
+fails and can be ignored.
 
 ## Usage
 
