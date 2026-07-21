@@ -44,6 +44,7 @@ __all__ = [
     "ScriptTraceFrame",
     "ScriptTraceFrameKind",
     "SigVersion",
+    "classify_script",
     "debug_script",
     "debug_transaction",
     "disassemble",
@@ -435,6 +436,44 @@ def disassemble(script):
     return out
 
 
+def classify_script(script):
+    """Best-effort classification of ``script`` (``bytes`` or
+    :class:`~pybitcoinkernel.ScriptPubkey`) into a standard output type.
+
+    Returns one of ``"P2PKH"``, ``"P2SH"``, ``"P2WPKH"``, ``"P2WSH"``,
+    ``"P2TR"``, ``"P2PK"``, ``"multisig"``, ``"OP_RETURN"``, a generic
+    ``"witness vN program"``, or ``""`` when the script matches no known
+    template. This only pattern-matches the bytes; the interpreter itself
+    does not care about these categories.
+    """
+    if hasattr(script, "to_bytes"):
+        script = script.to_bytes()
+    b = bytes(script)
+    n = len(b)
+    if n == 0:
+        return ""
+    if b[0] == 0x6A:  # OP_RETURN
+        return "OP_RETURN"
+    if n == 25 and b[0:3] == b"\x76\xa9\x14" and b[23:25] == b"\x88\xac":
+        return "P2PKH"
+    if n == 23 and b[0:2] == b"\xa9\x14" and b[22] == 0x87:
+        return "P2SH"
+    if n == 22 and b[0:2] == b"\x00\x14":
+        return "P2WPKH"
+    if n == 34 and b[0:2] == b"\x00\x20":
+        return "P2WSH"
+    if n == 34 and b[0:2] == b"\x51\x20":
+        return "P2TR"
+    if (n == 35 and b[0] == 0x21 and b[34] == 0xAC) or (n == 67 and b[0] == 0x41 and b[66] == 0xAC):
+        return "P2PK"
+    if n >= 4 and 0x51 <= b[0] <= 0x60 and 0x51 <= b[-2] <= 0x60 and b[-1] == 0xAE:
+        return "multisig"
+    # Generic witness program: OP_0/OP_1..OP_16 then a single 2..40 byte push.
+    if n >= 4 and n == b[1] + 2 and (b[0] == 0x00 or 0x51 <= b[0] <= 0x60) and 0x02 <= b[1] <= 0x28:
+        return f"witness v{0 if b[0] == 0x00 else b[0] - 0x50} program"
+    return ""
+
+
 def trace_available():
     """Return ``True`` if libbitcoinkernel exposes the script trace hooks.
 
@@ -511,6 +550,11 @@ class ScriptExecution:
         """The :class:`SigVersion` this script ran under."""
         ref = self.begin or (self.frames[0] if self.frames else None)
         return SigVersion(ref.sig_version) if ref is not None else SigVersion.BASE
+
+    @property
+    def script_type(self):
+        """Best-effort standard type of this script (see :func:`classify_script`)."""
+        return classify_script(self.script)
 
     @property
     def error(self):
@@ -688,18 +732,47 @@ def _render_stack(stack, max_item_bytes):
     return "[" + ", ".join(_render_item(i, max_item_bytes) for i in stack) + "]"
 
 
+# The interpreter runs scripts in a fixed order per input: the scriptSig,
+# then the scriptPubkey, then any redeem (P2SH) or witness script.
+def _execution_role(idx, sig_version):
+    if idx == 0:
+        return "input script (scriptSig)"
+    if idx == 1:
+        return "output script (scriptPubkey)"
+    if sig_version == SigVersion.WITNESS_V0:
+        return "witness script (v0)"
+    if sig_version == SigVersion.TAPSCRIPT:
+        return "tapscript"
+    return "redeem script (P2SH)"
+
+
+def _seed_note(idx, sig_version):
+    """Where a later execution's initial stack comes from, or None."""
+    if idx < 2:
+        return None
+    if sig_version in (SigVersion.WITNESS_V0, SigVersion.TAPSCRIPT):
+        return "initial stack seeded from the input witness"
+    return "initial stack seeded from the scriptSig"
+
+
 def _format_trace(trace, max_item_bytes):
     lines = []
     verdict = "VALID" if trace.valid else "INVALID"
     lines.append(f"script verification: {verdict}  (error: {trace.error.name})")
     for idx, execution in enumerate(trace.executions):
         script_hex = execution.script.hex()
+        role = _execution_role(idx, execution.sig_version)
+        pattern = execution.script_type
         lines.append("")
-        lines.append(
-            f"=== script #{idx} : {execution.sig_version.name} "
-            f"({len(execution.script)} bytes) ==="
-        )
+        header = f"=== script #{idx}: {role}"
+        if pattern:
+            header += f" · {pattern}"
+        header += f" · {execution.sig_version.name} · {len(execution.script)} bytes ==="
+        lines.append(header)
         lines.append(f"    {script_hex or '(empty)'}")
+        seed = _seed_note(idx, execution.sig_version)
+        if seed:
+            lines.append(f"    ({seed})")
         # Show the opcode about to run (name + what it does), then the stack
         # as it stands *before* the opcode executes.
         for step in execution.steps:

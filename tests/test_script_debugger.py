@@ -121,6 +121,22 @@ def test_disassemble_pushdata1():
     assert dis == [(0, "OP_PUSHDATA1", b"\xde\xad")]
 
 
+def test_classify_script():
+    assert pbk.classify_script(bytes.fromhex(LEGACY_SPENT_SCRIPT)) == "P2PKH"
+    assert pbk.classify_script(bytes.fromhex(SEGWIT_SPENT_SCRIPT)) == "P2WSH"
+    assert pbk.classify_script(bytes.fromhex(TAPROOT_SPENT_SCRIPT)) == "P2TR"
+    assert pbk.classify_script(bytes.fromhex("001439440eae862e099f315c7726a6c3c53bc2aa4dea")) == "P2WPKH"
+    assert pbk.classify_script(bytes.fromhex("a9146c002a686959067f4866b8fb493ad7970290ab7287")) == "P2SH"
+    assert pbk.classify_script(bytes([0x21]) + b"\x02" * 33 + bytes([0xAC])) == "P2PK"
+    multisig = bytes([0x52, 0x21]) + b"\x02" * 33 + bytes([0x21]) + b"\x03" * 33 + bytes([0x52, 0xAE])
+    assert pbk.classify_script(multisig) == "multisig"
+    assert pbk.classify_script(bytes([0x6A, 0x03]) + b"abc") == "OP_RETURN"
+    # Accepts a ScriptPubkey too, and returns "" for empty/nonstandard.
+    assert pbk.classify_script(pbk.ScriptPubkey(bytes.fromhex(LEGACY_SPENT_SCRIPT))) == "P2PKH"
+    assert pbk.classify_script(b"") == ""
+    assert pbk.classify_script(bytes([0x01, 0x02])) == ""
+
+
 def test_scripterror_values():
     # A couple of anchors so the enum stays pinned to script_error.h.
     assert pbk.ScriptError.OK == 0
@@ -340,6 +356,33 @@ def test_format_returns_readable_text():
     # Each opcode line carries a plain-English description.
     assert "Duplicate the top stack item." in text
     assert str(text) == pbk.debug_script(script, 0, tx, 0, PRE_TAPROOT).format()
+
+
+@requires_trace
+def test_format_labels_roles_and_types():
+    script = pbk.ScriptPubkey(bytes.fromhex(LEGACY_SPENT_SCRIPT))
+    tx = pbk.Transaction(bytes.fromhex(LEGACY_SPENDING_TX))
+    trace = pbk.debug_script(script, 0, tx, 0, PRE_TAPROOT)
+
+    # The scriptPubkey is recognised as P2PKH via ScriptExecution.script_type.
+    assert trace.executions[1].script_type == "P2PKH"
+
+    text = trace.format()
+    assert "input script (scriptSig)" in text
+    assert "output script (scriptPubkey)" in text
+    assert "P2PKH" in text
+
+
+@requires_trace
+def test_format_segwit_witness_seed_note():
+    script = pbk.ScriptPubkey(bytes.fromhex(SEGWIT_SPENT_SCRIPT))
+    tx = pbk.Transaction(bytes.fromhex(SEGWIT_SPENDING_TX))
+    text = pbk.debug_script(script, SEGWIT_AMOUNT, tx, 0, PRE_TAPROOT).format()
+
+    assert "witness script (v0)" in text
+    assert "P2WSH" in text                                 # the output script
+    assert "multisig" in text                              # the witness script
+    assert "initial stack seeded from the input witness" in text
 
 
 @requires_trace

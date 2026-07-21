@@ -184,10 +184,16 @@ with pbk.script_trace(lambda frame: print(repr(frame))):
     pbk.verify_script(script, amount, tx_to, input_index, flags)
 ```
 
+The formatted trace annotates each script block with its role (input /
+output / witness or redeem script) and recognised type (`P2PKH`, `P2WPKH`,
+`P2TR`, …), and notes when a witness script's stack is seeded from the
+input witness. `pbk.disassemble()` decodes raw script bytes to opcodes and
+`pbk.classify_script()` returns a script's standard type; both are pure
+decoders that need no special build.
+
 The trace hooks are compiled in only when libbitcoinkernel is built with
 `-DENABLE_SCRIPT_TRACE=ON` (the bundled build does this automatically);
-`pbk.trace_available()` reports whether they are present. `pbk.disassemble()`
-decodes raw script bytes to opcodes and needs no special build.
+`pbk.trace_available()` reports whether they are present.
 
 ### Running a chainstate
 
