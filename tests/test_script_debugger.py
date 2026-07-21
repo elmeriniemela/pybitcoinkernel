@@ -78,6 +78,17 @@ def test_opcode_name_unknown():
     assert pbk.opcode_name(0xBB) == "OP_UNKNOWN_0xbb"
 
 
+def test_opcode_description():
+    assert pbk.opcode_description(0x76) == "Duplicate the top stack item."
+    assert pbk.opcode_description(0x00) == "Push an empty byte vector (represents false / zero)."
+    assert pbk.opcode_description(0x14) == "Push the next 20 bytes onto the stack."
+    assert pbk.opcode_description(0x51) == "Push the number 1."
+    assert pbk.opcode_description(0x60) == "Push the number 16."
+    assert pbk.opcode_description(0xAC).startswith("Check a signature")
+    # Unknown opcodes have no description rather than raising.
+    assert pbk.opcode_description(0xBB) == ""
+
+
 def test_disassemble_p2pkh():
     dis = pbk.disassemble(bytes.fromhex(LEGACY_SPENT_SCRIPT))
     names = [name for _pos, name, _data in dis]
@@ -261,6 +272,8 @@ def test_format_returns_readable_text():
     assert "VALID" in text
     assert "OP_CHECKSIG" in text
     assert "OP_DUP" in text
+    # Each opcode line carries a plain-English description.
+    assert "Duplicate the top stack item." in text
     assert str(text) == pbk.debug_script(script, 0, tx, 0, PRE_TAPROOT).format()
 
 

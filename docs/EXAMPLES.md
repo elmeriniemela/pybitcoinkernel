@@ -345,23 +345,23 @@ script verification: VALID  (error: OK)
 
 === script #0 : BASE (107 bytes) ===
     483045...857148617
-  #0000  OP_PUSHBYTES_72
+  #0000  OP_PUSHBYTES_72        Push the next 72 bytes onto the stack.
          stack: []
-  #0001  OP_PUSHBYTES_33
+  #0001  OP_PUSHBYTES_33        Push the next 33 bytes onto the stack.
          stack: [3045022100de1ac3bcdfb033...(72 bytes)]
   result: [3045022100de1ac3bcdfb033...(72 bytes), 03699b464d1d8bc9e47d4fb1...(33 bytes)]  -> OK
 
 === script #1 : BASE (25 bytes) ===
     76a9144bfbaf6afb76cc5771bc6404810d1cc041a6933988ac
-  #0000  OP_DUP
+  #0000  OP_DUP                 Duplicate the top stack item.
          stack: [<sig>, <pubkey>]
-  #0001  OP_HASH160
+  #0001  OP_HASH160             Replace the top item with RIPEMD160(SHA256(item)).
          stack: [<sig>, <pubkey>, <pubkey>]
-  #0002  OP_PUSHBYTES_20
+  #0002  OP_PUSHBYTES_20        Push the next 20 bytes onto the stack.
          stack: [<sig>, <pubkey>, 4bfbaf6afb76cc5771bc6404...(20 bytes)]
-  #0003  OP_EQUALVERIFY
+  #0003  OP_EQUALVERIFY         Fail the script unless the top two items are equal.
          stack: [<sig>, <pubkey>, <hash>, <hash>]
-  #0004  OP_CHECKSIG
+  #0004  OP_CHECKSIG            Check a signature against a pubkey; push true or false.
          stack: [<sig>, <pubkey>]
   result: [01]  -> OK
 

@@ -46,6 +46,7 @@ __all__ = [
     "SigVersion",
     "debug_script",
     "disassemble",
+    "opcode_description",
     "opcode_name",
     "script_trace",
     "trace_available",
@@ -265,6 +266,126 @@ def opcode_name(opcode):
     if 0x01 <= opcode <= 0x4B:
         return f"OP_PUSHBYTES_{opcode}"
     return f"OP_UNKNOWN_0x{opcode:02x}"
+
+
+# Opcode value -> a one-line plain-English description of its effect. Data
+# pushes (0x00..0x4e) and the OP_1..OP_16 range are described in
+# opcode_description() so the count/number can be interpolated.
+_OPCODE_DESCRIPTIONS = {
+    0x4F: "Push the number -1.",
+    0x50: "Reserved; makes the script invalid if executed.",
+    0x61: "Do nothing.",
+    0x62: "Reserved; makes the script invalid if executed.",
+    0x63: "If the top stack value is true, run the following block (pops it).",
+    0x64: "If the top stack value is false, run the following block (pops it).",
+    0x65: "Reserved; makes the script invalid even when not executed.",
+    0x66: "Reserved; makes the script invalid even when not executed.",
+    0x67: "Run the following block if the matching OP_IF/OP_NOTIF did not.",
+    0x68: "End an OP_IF / OP_NOTIF / OP_ELSE block.",
+    0x69: "Fail the script unless the top stack value is true; then pop it.",
+    0x6A: "Fail the script immediately (marks an output unspendable).",
+    0x6B: "Move the top stack item to the alt stack.",
+    0x6C: "Move the top alt-stack item back to the main stack.",
+    0x6D: "Remove the top two stack items.",
+    0x6E: "Duplicate the top two stack items.",
+    0x6F: "Duplicate the top three stack items.",
+    0x70: "Copy the second pair of items to the top.",
+    0x71: "Move the third pair of items to the top.",
+    0x72: "Swap the top two pairs of items.",
+    0x73: "Duplicate the top stack item if it is non-zero.",
+    0x74: "Push the current stack depth (number of items).",
+    0x75: "Remove the top stack item.",
+    0x76: "Duplicate the top stack item.",
+    0x77: "Remove the second-from-top stack item.",
+    0x78: "Copy the second-from-top item to the top.",
+    0x79: "Copy the item n-deep (n taken from the top) to the top.",
+    0x7A: "Move the item n-deep (n taken from the top) to the top.",
+    0x7B: "Rotate the top three items (third item moves to the top).",
+    0x7C: "Swap the top two items.",
+    0x7D: "Copy the top item and insert it below the second item.",
+    0x7E: "Disabled: concatenate two byte vectors.",
+    0x7F: "Disabled: extract a substring.",
+    0x80: "Disabled: keep the left part of a string.",
+    0x81: "Disabled: keep the right part of a string.",
+    0x82: "Push the byte length of the top item (without removing it).",
+    0x83: "Disabled: bitwise NOT.",
+    0x84: "Disabled: bitwise AND.",
+    0x85: "Disabled: bitwise OR.",
+    0x86: "Disabled: bitwise XOR.",
+    0x87: "Push true if the top two items are equal, else false.",
+    0x88: "Fail the script unless the top two items are equal.",
+    0x89: "Reserved; makes the script invalid if executed.",
+    0x8A: "Reserved; makes the script invalid if executed.",
+    0x8B: "Add 1 to the top number.",
+    0x8C: "Subtract 1 from the top number.",
+    0x8D: "Disabled: multiply the top number by 2.",
+    0x8E: "Disabled: divide the top number by 2.",
+    0x8F: "Negate the top number.",
+    0x90: "Replace the top number with its absolute value.",
+    0x91: "Push true if the top number is 0, else false.",
+    0x92: "Push true if the top number is not 0, else false.",
+    0x93: "Add the top two numbers.",
+    0x94: "Subtract the top number from the second-from-top number.",
+    0x95: "Disabled: multiply the top two numbers.",
+    0x96: "Disabled: divide the second number by the top.",
+    0x97: "Disabled: remainder of the division.",
+    0x98: "Disabled: left bit-shift.",
+    0x99: "Disabled: right bit-shift.",
+    0x9A: "Push true if both numbers are non-zero.",
+    0x9B: "Push true if either number is non-zero.",
+    0x9C: "Push true if the two numbers are equal.",
+    0x9D: "Fail the script unless the two numbers are equal.",
+    0x9E: "Push true if the two numbers are not equal.",
+    0x9F: "Push true if the second number is less than the top.",
+    0xA0: "Push true if the second number is greater than the top.",
+    0xA1: "Push true if the second number is less than or equal to the top.",
+    0xA2: "Push true if the second number is greater than or equal to the top.",
+    0xA3: "Push the smaller of the top two numbers.",
+    0xA4: "Push the larger of the top two numbers.",
+    0xA5: "Push true if x is within the range [min, max).",
+    0xA6: "Replace the top item with its RIPEMD-160 hash.",
+    0xA7: "Replace the top item with its SHA-1 hash.",
+    0xA8: "Replace the top item with its SHA-256 hash.",
+    0xA9: "Replace the top item with RIPEMD160(SHA256(item)).",
+    0xAA: "Replace the top item with SHA256(SHA256(item)).",
+    0xAB: "Mark where signing of the script starts (for later signatures).",
+    0xAC: "Check a signature against a pubkey; push true or false.",
+    0xAD: "Check a signature against a pubkey; fail the script if invalid.",
+    0xAE: "Check M-of-N signatures against N pubkeys; push true or false.",
+    0xAF: "Check M-of-N signatures; fail the script if invalid.",
+    0xB0: "Do nothing (reserved for future soft-fork upgrades).",
+    0xB1: "Fail unless the tx locktime is at/after the top value (BIP65).",
+    0xB2: "Fail unless the input's relative locktime is satisfied (BIP112).",
+    0xB3: "Do nothing (reserved for future soft-fork upgrades).",
+    0xB4: "Do nothing (reserved for future soft-fork upgrades).",
+    0xB5: "Do nothing (reserved for future soft-fork upgrades).",
+    0xB6: "Do nothing (reserved for future soft-fork upgrades).",
+    0xB7: "Do nothing (reserved for future soft-fork upgrades).",
+    0xB8: "Do nothing (reserved for future soft-fork upgrades).",
+    0xB9: "Do nothing (reserved for future soft-fork upgrades).",
+    0xBA: "Tapscript: add 1 to a counter if the signature is valid (BIP342).",
+    0xFF: "Invalid opcode; always fails the script.",
+}
+
+
+def opcode_description(opcode):
+    """Return a short plain-English description of what ``opcode`` does.
+
+    Returns an empty string for opcodes with no known description.
+    """
+    if opcode == 0x00:
+        return "Push an empty byte vector (represents false / zero)."
+    if 0x01 <= opcode <= 0x4B:
+        return f"Push the next {opcode} bytes onto the stack."
+    if opcode == 0x4C:
+        return "Push bytes counted by the next 1-byte length."
+    if opcode == 0x4D:
+        return "Push bytes counted by the next 2-byte little-endian length."
+    if opcode == 0x4E:
+        return "Push bytes counted by the next 4-byte little-endian length."
+    if 0x51 <= opcode <= 0x60:
+        return f"Push the number {opcode - 0x50}."
+    return _OPCODE_DESCRIPTIONS.get(opcode, "")
 
 
 def disassemble(script):
@@ -545,13 +666,13 @@ def _format_trace(trace, max_item_bytes):
             f"({len(execution.script)} bytes) ==="
         )
         lines.append(f"    {script_hex or '(empty)'}")
-        # Show the stack before each opcode, then the opcode about to run.
+        # Show the opcode about to run (name + what it does), then the stack
+        # as it stands *before* the opcode executes.
         for step in execution.steps:
-            skipped = "" if step.executed else "  (skipped)"
-            lines.append(
-                f"  #{step.opcode_pos:04d}  {opcode_name(step.opcode):<22}"
-                f"{skipped}"
-            )
+            note = opcode_description(step.opcode)
+            if not step.executed:
+                note = (note + "  " if note else "") + "(skipped in this branch)"
+            lines.append(f"  #{step.opcode_pos:04d}  {opcode_name(step.opcode):<22} {note}")
             lines.append(
                 f"         stack: {_render_stack(step.stack, max_item_bytes)}"
             )
