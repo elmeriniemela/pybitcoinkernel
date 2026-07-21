@@ -327,6 +327,14 @@ for execution in trace.executions:
         step.stack                     # tuple of bytes, before the opcode runs
 ```
 
+`debug_script()` (like `verify_script()`) works on **one input**. To cover
+a whole transaction, pass one `TransactionOutput` per input (the coin it
+spends, in order): `pbk.verify_transaction(tx, spent_outputs)` returns
+`True` iff every input's script verifies, and `pbk.debug_transaction(tx,
+spent_outputs)` returns one `ScriptTrace` per input. Both are per-input
+*script* checks looped over the inputs — not full consensus validation,
+which only `ChainstateManager.process_block()` performs.
+
 `pbk.disassemble(script_bytes)` decodes a script to `(pos, opcode, data)`
 tuples on its own, and `pbk.script_trace(callback)` is a context manager
 that streams frames for *any* script that runs inside it — including deep

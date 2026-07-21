@@ -159,6 +159,23 @@ for execution in trace.executions: # one per script the interpreter ran
         print(pbk.opcode_name(step.opcode), [b.hex() for b in step.stack])
 ```
 
+`verify_script()` / `debug_script()` verify **one input** (one script
+pubkey against one `input_index`) — that is the kernel's primitive. A
+transaction's scripts pass only if every input does, so pass one
+`TransactionOutput` per input (the coin it spends, in order) to the
+whole-transaction helpers:
+
+```python
+spent = [pbk.TransactionOutput(script_i, amount_i) for ...]   # one per input
+ok = pbk.verify_transaction(tx, spent)             # True iff every input verifies
+traces = pbk.debug_transaction(tx, spent)          # one ScriptTrace per input
+```
+
+Note this is per-input *script* verification looped over the inputs, not
+full consensus validation — amounts, double-spends, weight and coinbase
+maturity are enforced only by `ChainstateManager.process_block()` against a
+chainstate.
+
 To trace scripts as they run elsewhere (e.g. inside `process_block`),
 install your own frame callback with the `script_trace` context manager:
 

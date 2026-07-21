@@ -132,6 +132,45 @@ def test_trace_available_is_bool():
     assert isinstance(pbk.trace_available(), bool)
 
 
+# --- verify_transaction: loops the per-input primitive (no tracing) ----
+
+
+def test_verify_transaction_legacy_all_inputs_valid():
+    tx = pbk.Transaction(bytes.fromhex(LEGACY_SPENDING_TX))
+    spent = [pbk.TransactionOutput(pbk.ScriptPubkey(bytes.fromhex(LEGACY_SPENT_SCRIPT)), 0)]
+    assert pbk.verify_transaction(tx, spent, PRE_TAPROOT) is True
+    # A full spent-output set also verifies under the default ALL flags.
+    assert pbk.verify_transaction(tx, spent) is True
+
+
+def test_verify_transaction_segwit():
+    tx = pbk.Transaction(bytes.fromhex(SEGWIT_SPENDING_TX))
+    spent = [pbk.TransactionOutput(pbk.ScriptPubkey(bytes.fromhex(SEGWIT_SPENT_SCRIPT)), SEGWIT_AMOUNT)]
+    assert pbk.verify_transaction(tx, spent, PRE_TAPROOT) is True
+    # A wrong amount fails (segwit signatures commit to it).
+    bad = [pbk.TransactionOutput(pbk.ScriptPubkey(bytes.fromhex(SEGWIT_SPENT_SCRIPT)), SEGWIT_AMOUNT + 1)]
+    assert pbk.verify_transaction(tx, bad, PRE_TAPROOT) is False
+
+
+def test_verify_transaction_wrong_prevout_fails():
+    tx = pbk.Transaction(bytes.fromhex(LEGACY_SPENDING_TX))
+    wrong = [pbk.TransactionOutput(pbk.ScriptPubkey(bytes.fromhex(SEGWIT_SPENT_SCRIPT)), 0)]
+    assert pbk.verify_transaction(tx, wrong, PRE_TAPROOT) is False
+
+
+def test_verify_transaction_taproot():
+    tx = pbk.Transaction(bytes.fromhex(TAPROOT_SPENDING_TX))
+    spent = [pbk.TransactionOutput(pbk.ScriptPubkey(bytes.fromhex(TAPROOT_SPENT_SCRIPT)), TAPROOT_AMOUNT)]
+    assert pbk.verify_transaction(tx, spent) is True
+
+
+def test_verify_transaction_count_mismatch_raises():
+    tx = pbk.Transaction(bytes.fromhex(LEGACY_SPENDING_TX))  # 1 input
+    out = pbk.TransactionOutput(pbk.ScriptPubkey(bytes.fromhex(LEGACY_SPENT_SCRIPT)), 0)
+    with pytest.raises(ValueError):
+        pbk.verify_transaction(tx, [out, out])
+
+
 # --- Tracing (needs ENABLE_SCRIPT_TRACE) -------------------------------
 
 
@@ -261,6 +300,32 @@ def test_debug_failing_spend_reports_invalid():
     text = trace.format()
     assert "INVALID" in text
     assert "verification failed" in text
+
+
+@requires_trace
+def test_debug_transaction_traces_every_input():
+    tx = pbk.Transaction(bytes.fromhex(LEGACY_SPENDING_TX))
+    spent = [pbk.TransactionOutput(pbk.ScriptPubkey(bytes.fromhex(LEGACY_SPENT_SCRIPT)), 0)]
+
+    traces = pbk.debug_transaction(tx, spent, PRE_TAPROOT)
+    assert isinstance(traces, list)
+    assert len(traces) == tx.n_inputs
+    assert all(t.valid for t in traces)
+
+    # Each input's trace matches debugging that input on its own.
+    single = pbk.debug_script(
+        pbk.ScriptPubkey(bytes.fromhex(LEGACY_SPENT_SCRIPT)), 0, tx, 0, PRE_TAPROOT
+    )
+    assert len(traces[0].executions) == len(single.executions)
+    assert len(traces[0].frames) == len(single.frames)
+
+
+@requires_trace
+def test_debug_transaction_count_mismatch_raises():
+    tx = pbk.Transaction(bytes.fromhex(LEGACY_SPENDING_TX))  # 1 input
+    out = pbk.TransactionOutput(pbk.ScriptPubkey(bytes.fromhex(LEGACY_SPENT_SCRIPT)), 0)
+    with pytest.raises(ValueError):
+        pbk.debug_transaction(tx, [out, out])
 
 
 @requires_trace

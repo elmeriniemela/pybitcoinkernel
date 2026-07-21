@@ -74,6 +74,17 @@ def main() -> None:
     print()
     print(f"spending the wrong script: valid={bad.valid}")
 
+    # --- Whole-transaction helpers: verify/trace every input in one call.
+    # Pass one TransactionOutput (the spent coin) per input, in order. This
+    # tx has a single P2PKH input, so it's a one-element list. It's per-input
+    # script verification looped -- not full consensus validation. ---------
+    spent_outputs = [pbk.TransactionOutput(script, 0)]
+    print()
+    print(f"verify_transaction (all inputs): {pbk.verify_transaction(tx, spent_outputs, flags.ALL ^ flags.TAPROOT)}")
+    traces = pbk.debug_transaction(tx, spent_outputs, flags.ALL ^ flags.TAPROOT)
+    print(f"debug_transaction: {len(traces)} input(s), "
+          f"all valid={all(t.valid for t in traces)}")
+
     # --- Advanced: register your own frame callback for the duration of a
     # block. This is the same hook debug_script() uses; it fires for every
     # script evaluated while the context is open, including during

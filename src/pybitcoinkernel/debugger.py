@@ -45,6 +45,7 @@ __all__ = [
     "ScriptTraceFrameKind",
     "SigVersion",
     "debug_script",
+    "debug_transaction",
     "disassemble",
     "opcode_description",
     "opcode_name",
@@ -624,6 +625,39 @@ def debug_script(
             precomputed_transaction_data,
         )
     return ScriptTrace(valid, frames)
+
+
+def debug_transaction(tx, spent_outputs, flags=None):
+    """Trace the script verification of *every* input of ``tx``.
+
+    ``spent_outputs`` is one :class:`~pybitcoinkernel.TransactionOutput` per
+    input, in input order -- the coin each input spends. Returns a list of
+    :class:`ScriptTrace`, one per input in the same order; the overall
+    script-level verdict is ``all(t.valid for t in traces)``.
+
+    This is only per-input *script* verification (looped), not full consensus
+    validation -- amounts, double-spends, weight and maturity are enforced by
+    the chainstate, not here. Raises :class:`~pybitcoinkernel.KernelError` if
+    the kernel was not built with script tracing enabled (see
+    :func:`trace_available`), and ``ValueError`` if the number of spent
+    outputs does not match the number of inputs.
+    """
+    import pybitcoinkernel as _pbk
+
+    if flags is None:
+        flags = _pbk.ScriptVerificationFlags.ALL
+    spent = list(spent_outputs)
+    if len(spent) != tx.n_inputs:
+        raise ValueError(
+            f"expected one spent output per input ({tx.n_inputs}), got {len(spent)}"
+        )
+    # Built once and shared across inputs so taproot inputs (whose sighash
+    # commits to all spent outputs) verify under the default ALL flags.
+    precomputed = _pbk.PrecomputedTransactionData(tx, spent)
+    return [
+        debug_script(o.script_pubkey, o.amount, tx, i, flags, precomputed)
+        for i, o in enumerate(spent)
+    ]
 
 
 def _cast_to_bool(item):

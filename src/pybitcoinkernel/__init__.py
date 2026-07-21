@@ -61,6 +61,7 @@ from pybitcoinkernel.debugger import (
     ScriptTraceFrameKind,
     SigVersion,
     debug_script,
+    debug_transaction,
     disassemble,
     opcode_description,
     opcode_name,
@@ -180,6 +181,33 @@ def verify_script(
     )
 
 
+def verify_transaction(tx, spent_outputs, flags=ScriptVerificationFlags.ALL):
+    """Verify the input scripts of *every* input of ``tx``.
+
+    ``spent_outputs`` is one :class:`TransactionOutput` per input, in input
+    order -- the coin each input spends. Returns ``True`` iff every input's
+    script verifies under ``flags``.
+
+    This loops the per-input :func:`verify_script` primitive; it is not full
+    consensus validation (amounts, double-spends, weight, locktime and
+    coinbase maturity are enforced by the chainstate via
+    :meth:`ChainstateManager.process_block`, not here). Raises ``ValueError``
+    if the number of spent outputs does not match the number of inputs.
+    """
+    spent = list(spent_outputs)
+    if len(spent) != tx.n_inputs:
+        raise ValueError(
+            f"expected one spent output per input ({tx.n_inputs}), got {len(spent)}"
+        )
+    # Built once and shared across inputs so taproot inputs (whose sighash
+    # commits to all spent outputs) verify under the default ALL flags.
+    precomputed = PrecomputedTransactionData(tx, spent)
+    return all(
+        verify_script(o.script_pubkey, o.amount, tx, i, flags, precomputed)
+        for i, o in enumerate(spent)
+    )
+
+
 def load_chainstate(
     chain_type,
     data_dir,
@@ -258,6 +286,7 @@ __all__ = [
     "ValidationMode",
     "Warning_",
     "debug_script",
+    "debug_transaction",
     "disassemble",
     "load_chainstate",
     "logging_disable",
@@ -270,4 +299,5 @@ __all__ = [
     "script_trace",
     "trace_available",
     "verify_script",
+    "verify_transaction",
 ]
