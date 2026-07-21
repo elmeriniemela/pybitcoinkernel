@@ -77,7 +77,8 @@ git submodule update --init
 cmake -S external/bitcoin -B vendor/build \
     -DBUILD_KERNEL_LIB=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_DAEMON=OFF -DBUILD_CLI=OFF -DBUILD_TX=OFF -DBUILD_UTIL=OFF \
-    -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF -DENABLE_WALLET=OFF -DWITH_ZMQ=OFF -DENABLE_IPC=OFF
+    -DBUILD_TESTS=OFF -DBUILD_BENCH=OFF -DENABLE_WALLET=OFF -DWITH_ZMQ=OFF \
+    -DENABLE_IPC=OFF -DENABLE_SCRIPT_TRACE=ON
 cmake --build vendor/build --target bitcoinkernel -j$(nproc)
 
 # 2. Build and install the package (setup.py picks vendor/build up)
@@ -142,6 +143,34 @@ spent = pbk.TransactionOutput(script, amount)
 precomputed = pbk.PrecomputedTransactionData(tx, [spent])
 ok = pbk.verify_script(script, amount, tx, 0, pbk.ScriptVerificationFlags.ALL, precomputed)
 ```
+
+### Script debugging
+
+`debug_script()` takes the same arguments as `verify_script()` but also
+captures a step-by-step trace of the script interpreter — the stack before
+every opcode, for the scriptSig, scriptPubkey, and any witness script:
+
+```python
+trace = pbk.debug_script(script, amount, tx_to, input_index, flags)
+print(trace)                       # btcdeb-style, opcode-by-opcode dump
+print(trace.valid, trace.error)    # verdict + ScriptError
+for execution in trace.executions: # one per script the interpreter ran
+    for step in execution.steps:
+        print(pbk.opcode_name(step.opcode), [b.hex() for b in step.stack])
+```
+
+To trace scripts as they run elsewhere (e.g. inside `process_block`),
+install your own frame callback with the `script_trace` context manager:
+
+```python
+with pbk.script_trace(lambda frame: print(repr(frame))):
+    pbk.verify_script(script, amount, tx_to, input_index, flags)
+```
+
+The trace hooks are compiled in only when libbitcoinkernel is built with
+`-DENABLE_SCRIPT_TRACE=ON` (the bundled build does this automatically);
+`pbk.trace_available()` reports whether they are present. `pbk.disassemble()`
+decodes raw script bytes to opcodes and needs no special build.
 
 ### Running a chainstate
 

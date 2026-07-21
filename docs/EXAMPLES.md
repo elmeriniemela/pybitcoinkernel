@@ -27,6 +27,7 @@ second, in a temporary directory that is cleaned up afterwards.
 | [`04_chainstate_basics.py`](../examples/04_chainstate_basics.py) | Running a chainstate: validating blocks, reading chain data |
 | [`05_spent_outputs.py`](../examples/05_spent_outputs.py) | Spending coins and reading undo data |
 | [`06_callbacks_and_logging.py`](../examples/06_callbacks_and_logging.py) | Validation events, notifications, and log routing |
+| [`07_script_debugger.py`](../examples/07_script_debugger.py) | Stepping through the script interpreter opcode by opcode |
 
 ---
 
@@ -303,3 +304,94 @@ Two logging gotchas, straight from the kernel's own documentation:
 - `pbk.logging_disable()` permanently disables kernel logging for the
   process (examples 04/05 use it to keep their output clean). Don't call
   it while a connection exists.
+
+## 07 — Script debugger
+
+`verify_script()` says *whether* a spend is valid; `debug_script()` shows
+*how* — it runs the same verification but captures a snapshot of the
+interpreter's stack on evaluator entry, before every opcode, and on exit.
+One verification runs several scripts in turn (the input's scriptSig, the
+output's scriptPubkey, then any witness script), so the trace is grouped
+into one `ScriptExecution` per script:
+
+```python
+trace = pbk.debug_script(script, amount, tx, input_index, flags)
+
+print(trace)                       # btcdeb-style dump (also trace.format())
+print(trace.valid, trace.error)    # verdict + ScriptError
+
+for execution in trace.executions:
+    execution.sig_version          # BASE / WITNESS_V0 / TAPROOT / TAPSCRIPT
+    for step in execution.steps:   # one STEP frame per opcode
+        pbk.opcode_name(step.opcode)   # "OP_CHECKSIG", "OP_PUSHBYTES_72", ...
+        step.stack                     # tuple of bytes, before the opcode runs
+```
+
+`pbk.disassemble(script_bytes)` decodes a script to `(pos, opcode, data)`
+tuples on its own, and `pbk.script_trace(callback)` is a context manager
+that streams frames for *any* script that runs inside it — including deep
+in `process_block()`. Building the trace on a P2PKH spend:
+
+```console
+$ .venv/bin/python examples/07_script_debugger.py
+scriptPubkey disassembly:
+   0  OP_DUP
+   1  OP_HASH160
+   2  OP_PUSHBYTES_20  4bfbaf6afb76cc5771bc6404810d1cc041a69339
+   3  OP_EQUALVERIFY
+   4  OP_CHECKSIG
+
+script verification: VALID  (error: OK)
+
+=== script #0 : BASE (107 bytes) ===
+    483045...857148617
+  #0000  OP_PUSHBYTES_72
+         stack: []
+  #0001  OP_PUSHBYTES_33
+         stack: [3045022100de1ac3bcdfb033...(72 bytes)]
+  result: [3045022100de1ac3bcdfb033...(72 bytes), 03699b464d1d8bc9e47d4fb1...(33 bytes)]  -> OK
+
+=== script #1 : BASE (25 bytes) ===
+    76a9144bfbaf6afb76cc5771bc6404810d1cc041a6933988ac
+  #0000  OP_DUP
+         stack: [<sig>, <pubkey>]
+  #0001  OP_HASH160
+         stack: [<sig>, <pubkey>, <pubkey>]
+  #0002  OP_PUSHBYTES_20
+         stack: [<sig>, <pubkey>, 4bfbaf6afb76cc5771bc6404...(20 bytes)]
+  #0003  OP_EQUALVERIFY
+         stack: [<sig>, <pubkey>, <hash>, <hash>]
+  #0004  OP_CHECKSIG
+         stack: [<sig>, <pubkey>]
+  result: [01]  -> OK
+
+verdict: valid=True, error=OK
+  script #0 (BASE): 2 opcodes, stack depth over time [0, 1]
+  script #1 (BASE): 5 opcodes, stack depth over time [2, 3, 3, 4, 2]
+
+spending the wrong script: valid=False
+streaming callback saw 7 opcode steps
+```
+
+The stack shown at each step is the state *before* that opcode executes;
+the `result:` line is the stack at the `END` frame. Reading script #1:
+`OP_DUP` copies the pubkey, `OP_HASH160` replaces the copy with its
+20-byte hash, the push adds the expected hash, `OP_EQUALVERIFY` checks
+they match (consuming both), and `OP_CHECKSIG` verifies the signature,
+leaving a single true value.
+
+The trace hooks are compiled in only when libbitcoinkernel is built with
+`-DENABLE_SCRIPT_TRACE=ON`. The bundled build (and the wheels) enable it;
+`pbk.trace_available()` reports whether a given build has it, and
+`debug_script()` / `script_trace()` raise `KernelError` if it does not.
+
+Two nuances worth knowing:
+
+- A `False` verdict can pair with `error == OK`. The interpreter can run
+  every script to completion yet leave a *false* value on the stack; that
+  final `EVAL_FALSE` verdict is decided by `VerifyScript` *after* the last
+  trace frame, so `trace.format()` calls it out explicitly.
+- A taproot **key-path** spend runs no script at all — the signature is
+  checked outside the interpreter — so only the empty scriptSig and the
+  witness-program scriptPubkey are traced. Script-path spends are what
+  produce `TAPSCRIPT` executions.

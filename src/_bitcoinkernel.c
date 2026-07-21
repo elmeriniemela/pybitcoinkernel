@@ -24,6 +24,7 @@
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include <structmember.h>
 
 #include <bitcoinkernel.h>
 
@@ -149,6 +150,25 @@ typedef struct {
     btck_Coin* ptr;
 } CoinObject;
 
+/* Immutable snapshot of the script interpreter state at one trace frame.
+ * All fields are copied out of the transient btck_ScriptTraceFrame the kernel
+ * passes to the callback, so the object outlives the callback invocation. */
+typedef struct {
+    PyObject_HEAD
+    PyObject* stack;        /* tuple of bytes: main stack, bottom first */
+    PyObject* altstack;     /* tuple of bytes: alt stack, bottom first */
+    PyObject* script;       /* bytes: the script being evaluated */
+    PyObject* tapleaf_hash; /* bytes (32) or None */
+    unsigned int opcode_pos;
+    unsigned int codeseparator_pos;
+    int op_count;
+    int script_error;
+    unsigned char kind;
+    unsigned char opcode;
+    unsigned char sig_version;
+    char executed;
+} ScriptTraceFrameObject;
+
 /* Forward type declarations */
 static PyTypeObject TransactionType;
 static PyTypeObject ScriptPubkeyType;
@@ -172,6 +192,7 @@ static PyTypeObject ChainType_;
 static PyTypeObject BlockSpentOutputsType;
 static PyTypeObject TransactionSpentOutputsType;
 static PyTypeObject CoinType;
+static PyTypeObject ScriptTraceFrameType;
 
 static PyObject* KernelError;
 
@@ -683,6 +704,84 @@ static void
 vi_block_disconnected_cb(void* user_data, btck_Block* block, const btck_BlockTreeEntry* entry)
 {
     vi_block_event_cb(user_data, "block_disconnected", block, entry);
+}
+
+/* Script trace. Build a tuple of bytes from a stack of (ptr, size) pairs. */
+static PyObject*
+build_stack_tuple(const unsigned char* const* items, const size_t* sizes, size_t n)
+{
+    PyObject* tuple = PyTuple_New((Py_ssize_t)n);
+    if (tuple == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < n; i++) {
+        PyObject* item = PyBytes_FromStringAndSize((const char*)items[i], (Py_ssize_t)sizes[i]);
+        if (item == NULL) {
+            Py_DECREF(tuple);
+            return NULL;
+        }
+        PyTuple_SET_ITEM(tuple, (Py_ssize_t)i, item);
+    }
+    return tuple;
+}
+
+/* Snapshot the transient kernel frame into an owned ScriptTraceFrame object. */
+static PyObject*
+ScriptTraceFrame_from_c(const btck_ScriptTraceFrame* f)
+{
+    ScriptTraceFrameObject* self =
+        PyObject_New(ScriptTraceFrameObject, &ScriptTraceFrameType);
+    if (self == NULL) {
+        return NULL;
+    }
+    self->stack = NULL;
+    self->altstack = NULL;
+    self->script = NULL;
+    self->tapleaf_hash = NULL;
+
+    self->stack = build_stack_tuple(f->stack_items, f->stack_item_sizes, f->stack_size);
+    self->altstack =
+        build_stack_tuple(f->altstack_items, f->altstack_item_sizes, f->altstack_size);
+    self->script = PyBytes_FromStringAndSize((const char*)f->script, (Py_ssize_t)f->script_size);
+    if (f->tapleaf_hash != NULL) {
+        self->tapleaf_hash = PyBytes_FromStringAndSize((const char*)f->tapleaf_hash, 32);
+    } else {
+        self->tapleaf_hash = Py_NewRef(Py_None);
+    }
+    if (self->stack == NULL || self->altstack == NULL || self->script == NULL ||
+        self->tapleaf_hash == NULL) {
+        Py_DECREF(self);
+        return NULL;
+    }
+
+    self->kind = f->kind;
+    self->opcode = f->opcode;
+    self->sig_version = f->sig_version;
+    self->executed = f->f_exec ? 1 : 0;
+    self->op_count = f->op_count;
+    self->opcode_pos = f->opcode_pos;
+    self->codeseparator_pos = f->codeseparator_pos;
+    self->script_error = f->script_error;
+    return (PyObject*)self;
+}
+
+static void
+script_trace_cb(void* user_data, const btck_ScriptTraceFrame* frame)
+{
+    PyGILState_STATE gil = PyGILState_Ensure();
+    PyObject* callback = (PyObject*)user_data;
+    PyObject* frame_obj = ScriptTraceFrame_from_c(frame);
+    if (frame_obj != NULL) {
+        PyObject* result = PyObject_CallFunctionObjArgs(callback, frame_obj, NULL);
+        if (result == NULL) {
+            PyErr_WriteUnraisable(callback);
+        }
+        Py_XDECREF(result);
+        Py_DECREF(frame_obj);
+    } else {
+        PyErr_WriteUnraisable(callback);
+    }
+    PyGILState_Release(gil);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1876,6 +1975,74 @@ static PyTypeObject LoggingConnectionType = {
 };
 
 /* ------------------------------------------------------------------ */
+/* ScriptTraceFrame                                                   */
+/* ------------------------------------------------------------------ */
+
+static void
+ScriptTraceFrame_dealloc(ScriptTraceFrameObject* self)
+{
+    Py_XDECREF(self->stack);
+    Py_XDECREF(self->altstack);
+    Py_XDECREF(self->script);
+    Py_XDECREF(self->tapleaf_hash);
+    Py_TYPE(self)->tp_free((PyObject*)self);
+}
+
+static PyObject*
+ScriptTraceFrame_repr(ScriptTraceFrameObject* self)
+{
+    const char* kind = self->kind == btck_ScriptTraceFrameKind_BEGIN ? "BEGIN"
+                     : self->kind == btck_ScriptTraceFrameKind_STEP  ? "STEP"
+                     : self->kind == btck_ScriptTraceFrameKind_END   ? "END"
+                                                                     : "?";
+    Py_ssize_t depth = self->stack != NULL ? PyTuple_GET_SIZE(self->stack) : 0;
+    return PyUnicode_FromFormat(
+        "<ScriptTraceFrame %s opcode_pos=%u opcode=0x%02x stack_depth=%zd>",
+        kind, self->opcode_pos, (unsigned)self->opcode, depth);
+}
+
+static PyMemberDef ScriptTraceFrame_members[] = {
+    {"kind", T_UBYTE, offsetof(ScriptTraceFrameObject, kind), READONLY,
+     "Frame kind: SCRIPT_TRACE_FRAME_KIND_{BEGIN,STEP,END}."},
+    {"stack", T_OBJECT_EX, offsetof(ScriptTraceFrameObject, stack), READONLY,
+     "The main stack as a tuple of bytes (bottom item first)."},
+    {"altstack", T_OBJECT_EX, offsetof(ScriptTraceFrameObject, altstack), READONLY,
+     "The alt stack as a tuple of bytes (bottom item first)."},
+    {"script", T_OBJECT_EX, offsetof(ScriptTraceFrameObject, script), READONLY,
+     "The script being evaluated, as bytes."},
+    {"opcode_pos", T_UINT, offsetof(ScriptTraceFrameObject, opcode_pos), READONLY,
+     "Index of the current opcode (counting opcodes, not bytes)."},
+    {"opcode", T_UBYTE, offsetof(ScriptTraceFrameObject, opcode), READONLY,
+     "The opcode under evaluation. Only meaningful in STEP frames."},
+    {"op_count", T_INT, offsetof(ScriptTraceFrameObject, op_count), READONLY,
+     "Counter towards the ops-per-script limit."},
+    {"executed", T_BOOL, offsetof(ScriptTraceFrameObject, executed), READONLY,
+     "True if the opcode is executed; False if skipped in a conditional branch."},
+    {"sig_version", T_UBYTE, offsetof(ScriptTraceFrameObject, sig_version), READONLY,
+     "Signature version: SIG_VERSION_{BASE,WITNESS_V0,TAPROOT,TAPSCRIPT}."},
+    {"tapleaf_hash", T_OBJECT_EX, offsetof(ScriptTraceFrameObject, tapleaf_hash), READONLY,
+     "32-byte tapleaf hash when evaluating a tapscript, else None."},
+    {"codeseparator_pos", T_UINT, offsetof(ScriptTraceFrameObject, codeseparator_pos), READONLY,
+     "Opcode position of the last OP_CODESEPARATOR, or 0xFFFFFFFF if none."},
+    {"script_error", T_INT, offsetof(ScriptTraceFrameObject, script_error), READONLY,
+     "Script error code. Only meaningful in END frames (0 == success)."},
+    {NULL},
+};
+
+static PyTypeObject ScriptTraceFrameType = {
+    .ob_base = PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "pybitcoinkernel._bitcoinkernel.ScriptTraceFrame",
+    .tp_basicsize = sizeof(ScriptTraceFrameObject),
+    .tp_dealloc = (destructor)ScriptTraceFrame_dealloc,
+    .tp_repr = (reprfunc)ScriptTraceFrame_repr,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = PyDoc_STR("An immutable snapshot of the script interpreter state at one\n"
+                        "trace frame. Delivered to script trace callbacks; cannot be\n"
+                        "constructed directly."),
+    .tp_members = ScriptTraceFrame_members,
+};
+
+/* ------------------------------------------------------------------ */
 /* ChainParameters                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -2852,6 +3019,38 @@ mod_logging_disable_category(PyObject* module, PyObject* arg)
     Py_RETURN_NONE;
 }
 
+/* ------------------------------------------------------------------ */
+/* Module-level script trace functions                                */
+/* ------------------------------------------------------------------ */
+
+static PyObject*
+mod_script_trace_register_callback(PyObject* module, PyObject* callback)
+{
+    if (!PyCallable_Check(callback)) {
+        PyErr_SetString(PyExc_TypeError, "callback must be callable");
+        return NULL;
+    }
+    Py_INCREF(callback);
+    int rc = btck_script_trace_register_callback(script_trace_cb, callback,
+                                                 pyobject_destroy_cb);
+    if (rc != 0) {
+        /* When tracing is unavailable the kernel already invoked the destroy
+         * callback, releasing the reference we took, so do not decref again. */
+        PyErr_SetString(KernelError,
+                        "script tracing is unavailable; rebuild libbitcoinkernel "
+                        "with -DENABLE_SCRIPT_TRACE=ON");
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject*
+mod_script_trace_unregister_callback(PyObject* module, PyObject* Py_UNUSED(ignored))
+{
+    btck_script_trace_unregister_callback();
+    Py_RETURN_NONE;
+}
+
 static PyMethodDef module_methods[] = {
     {"logging_disable", mod_logging_disable, METH_NOARGS,
      "Permanently disable the global internal logger."},
@@ -2868,6 +3067,14 @@ static PyMethodDef module_methods[] = {
      "Enable logging for a LOG_CATEGORY_*."},
     {"logging_disable_category", mod_logging_disable_category, METH_O,
      "Disable logging for a LOG_CATEGORY_*."},
+    {"script_trace_register_callback", mod_script_trace_register_callback, METH_O,
+     "script_trace_register_callback(callback) - install a global callback\n"
+     "invoked with a ScriptTraceFrame on script evaluator entry, once per\n"
+     "opcode, and on exit. Only one callback may be registered at a time;\n"
+     "registering replaces the previous one. Raises KernelError if the kernel\n"
+     "was not built with ENABLE_SCRIPT_TRACE."},
+    {"script_trace_unregister_callback", mod_script_trace_unregister_callback, METH_NOARGS,
+     "Remove the global script trace callback, if any."},
     {NULL, NULL, 0, NULL},
 };
 
@@ -2935,7 +3142,8 @@ PyInit__bitcoinkernel(void)
         add_type(module, "Chain", &ChainType_) < 0 ||
         add_type(module, "BlockSpentOutputs", &BlockSpentOutputsType) < 0 ||
         add_type(module, "TransactionSpentOutputs", &TransactionSpentOutputsType) < 0 ||
-        add_type(module, "Coin", &CoinType) < 0) {
+        add_type(module, "Coin", &CoinType) < 0 ||
+        add_type(module, "ScriptTraceFrame", &ScriptTraceFrameType) < 0) {
         Py_DECREF(module);
         return NULL;
     }
@@ -3014,6 +3222,17 @@ PyInit__bitcoinkernel(void)
     ADD_INT("LOG_LEVEL_TRACE", btck_LogLevel_TRACE);
     ADD_INT("LOG_LEVEL_DEBUG", btck_LogLevel_DEBUG);
     ADD_INT("LOG_LEVEL_INFO", btck_LogLevel_INFO);
+
+    /* Script trace frame kinds */
+    ADD_INT("SCRIPT_TRACE_FRAME_KIND_BEGIN", btck_ScriptTraceFrameKind_BEGIN);
+    ADD_INT("SCRIPT_TRACE_FRAME_KIND_STEP", btck_ScriptTraceFrameKind_STEP);
+    ADD_INT("SCRIPT_TRACE_FRAME_KIND_END", btck_ScriptTraceFrameKind_END);
+
+    /* Signature versions */
+    ADD_INT("SIG_VERSION_BASE", btck_SigVersion_BASE);
+    ADD_INT("SIG_VERSION_WITNESS_V0", btck_SigVersion_WITNESS_V0);
+    ADD_INT("SIG_VERSION_TAPROOT", btck_SigVersion_TAPROOT);
+    ADD_INT("SIG_VERSION_TAPSCRIPT", btck_SigVersion_TAPSCRIPT);
 
 #undef ADD_INT
 

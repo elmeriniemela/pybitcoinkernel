@@ -48,6 +48,9 @@ KERNEL_CMAKE_FLAGS = [
     # Multiprocess support would require Cap'n Proto; the kernel lib
     # doesn't need it.
     "-DENABLE_IPC=OFF",
+    # Compile in the script execution trace hooks that back the script
+    # debugger (pybitcoinkernel.debug_script / script_trace).
+    "-DENABLE_SCRIPT_TRACE=ON",
 ]
 
 NO_KERNEL_HELP = """\
