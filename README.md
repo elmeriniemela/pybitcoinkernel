@@ -112,7 +112,7 @@ gh workflow run wheels.yml && sleep 5 && gh run watch
 gh run download --name wheels-ubuntu-24.04 --name wheels-ubuntu-24.04-arm --dir wheelhouse
 
 # 4. Attach them to a GitHub release (creates the tag)
-gh release create v0.1.0 wheelhouse/**/*.whl --title v0.1.0 --notes "..."
+gh release create v0.1.0 wheelhouse/**/*.whl --title v0.1.0 --notes "new release"
 ```
 
 The install URL in [From prebuilt wheels](#from-prebuilt-wheels) follows
