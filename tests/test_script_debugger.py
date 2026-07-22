@@ -89,6 +89,27 @@ def test_opcode_description():
     assert pbk.opcode_description(0xBB) == ""
 
 
+def test_execution_role_and_seed_note_are_public_formatter_helpers():
+    assert pbk.execution_role(0, pbk.SigVersion.BASE) == "input script (scriptSig)"
+    assert pbk.execution_role(1, pbk.SigVersion.WITNESS_V0) == (
+        "output script (scriptPubkey)"
+    )
+    assert pbk.execution_role(2, pbk.SigVersion.WITNESS_V0) == "witness script (v0)"
+    assert pbk.execution_role(2, int(pbk.SigVersion.TAPSCRIPT)) == "tapscript"
+    assert pbk.execution_role(2, pbk.SigVersion.BASE) == "redeem script (P2SH)"
+
+    assert pbk.seed_note(0, pbk.SigVersion.BASE) is None
+    assert pbk.seed_note(2, pbk.SigVersion.WITNESS_V0) == (
+        "initial stack seeded from the input witness"
+    )
+    assert pbk.seed_note(2, pbk.SigVersion.TAPSCRIPT) == (
+        "initial stack seeded from the input witness"
+    )
+    assert pbk.seed_note(2, pbk.SigVersion.BASE) == (
+        "initial stack seeded from the scriptSig"
+    )
+
+
 def test_disassemble_p2pkh():
     dis = pbk.disassemble(bytes.fromhex(LEGACY_SPENT_SCRIPT))
     names = [name for _pos, name, _data in dis]

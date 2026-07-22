@@ -48,8 +48,10 @@ __all__ = [
     "debug_script",
     "debug_transaction",
     "disassemble",
+    "execution_role",
     "opcode_description",
     "opcode_name",
+    "seed_note",
     "script_trace",
     "trace_available",
 ]
@@ -734,7 +736,12 @@ def _render_stack(stack, max_item_bytes):
 
 # The interpreter runs scripts in a fixed order per input: the scriptSig,
 # then the scriptPubkey, then any redeem (P2SH) or witness script.
-def _execution_role(idx, sig_version):
+def execution_role(idx, sig_version):
+    """Human-readable role for the script execution at ``idx``.
+
+    ``idx`` is the execution's position within ``ScriptTrace.executions``.
+    ``sig_version`` may be a :class:`SigVersion` or equivalent integer.
+    """
     if idx == 0:
         return "input script (scriptSig)"
     if idx == 1:
@@ -746,13 +753,21 @@ def _execution_role(idx, sig_version):
     return "redeem script (P2SH)"
 
 
-def _seed_note(idx, sig_version):
-    """Where a later execution's initial stack comes from, or None."""
+def seed_note(idx, sig_version):
+    """Where a later execution's initial stack comes from, or ``None``.
+
+    ``idx`` is the execution's position within ``ScriptTrace.executions``.
+    ``sig_version`` may be a :class:`SigVersion` or equivalent integer.
+    """
     if idx < 2:
         return None
     if sig_version in (SigVersion.WITNESS_V0, SigVersion.TAPSCRIPT):
         return "initial stack seeded from the input witness"
     return "initial stack seeded from the scriptSig"
+
+
+_execution_role = execution_role
+_seed_note = seed_note
 
 
 def _format_trace(trace, max_item_bytes):
@@ -761,7 +776,7 @@ def _format_trace(trace, max_item_bytes):
     lines.append(f"script verification: {verdict}  (error: {trace.error.name})")
     for idx, execution in enumerate(trace.executions):
         script_hex = execution.script.hex()
-        role = _execution_role(idx, execution.sig_version)
+        role = execution_role(idx, execution.sig_version)
         pattern = execution.script_type
         lines.append("")
         header = f"=== script #{idx}: {role}"
@@ -770,7 +785,7 @@ def _format_trace(trace, max_item_bytes):
         header += f" · {execution.sig_version.name} · {len(execution.script)} bytes ==="
         lines.append(header)
         lines.append(f"    {script_hex or '(empty)'}")
-        seed = _seed_note(idx, execution.sig_version)
+        seed = seed_note(idx, execution.sig_version)
         if seed:
             lines.append(f"    ({seed})")
         # Show the opcode about to run (name + what it does), then the stack
