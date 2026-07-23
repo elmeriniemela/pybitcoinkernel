@@ -72,7 +72,7 @@ from pybitcoinkernel.debugger import (
     trace_available,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
 
 
 class ChainType(_enum.IntEnum):

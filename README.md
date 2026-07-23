@@ -1,7 +1,13 @@
 # PyBitcoinKernel
 
+> [!WARNING]
+> This is a hobby project, and should in no
+> way be used in software that is consensus-critical, deals with
+> (mainnet) coins, or is generally used in any production environment.
+
 A library that provides CPython bindings for the bitcoin kernel.
 
+* More professional implementation: https://github.com/stickies-v/py-bitcoinkernel
 * Bitcoin Kernel: https://thecharlatan.ch/kernel-docs/
 * Python/C API reference manual: https://docs.python.org/3/c-api/index.html
 
@@ -103,7 +109,9 @@ before accepting it.
 To cut a release:
 
 ```sh
-# 1. Bump `version` in pyproject.toml, commit, push.
+# 1. Bump both versions to the same value.
+#    - pyproject.toml: version = "0.1.4"
+#    - src/pybitcoinkernel/__init__.py: __version__ = "0.1.4"
 
 # 2. Build the wheels
 gh workflow run wheels.yml && sleep 5 && gh run watch
